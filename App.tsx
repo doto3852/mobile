@@ -1,21 +1,36 @@
 import React, {useEffect, useState} from 'react';
 import {View, Text, StyleSheet, TouchableOpacity} from 'react-native';
-import {gyroscope} from 'react-native-sensors';
+import {gyroscope, accelerometer} from 'react-native-sensors';
 import RNFS from 'react-native-fs';
+
+type Subscription = {
+  unsubscribe: () => void;
+};
 
 const App = () => {
   const [gyroData, setGyroData] = useState<any[]>([]);
+  const [accelData, setAccelData] = useState<any[]>([]); // 가속도 데이터를 저장할 상태
   const [isRecording, setIsRecording] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
-  const [currentValues, setCurrentValues] = useState({x: 0, y: 0, z: 0});
-  const [isStair, setIsStair] = useState(0); // 계단 여부를 저장하는 상태
+  const [currentGyroValues, setCurrentGyroValues] = useState({
+    x: 0,
+    y: 0,
+    z: 0,
+  });
+  const [currentAccelValues, setCurrentAccelValues] = useState({
+    ax: 0,
+    ay: 0,
+    az: 0,
+  });
+  const [isStair, setIsStair] = useState(0);
 
   useEffect(() => {
-    let subscription: any;
+    let gyroSubscription: Subscription | null = null;
+    let accelSubscription: Subscription | null = null;
 
     if (isRecording) {
-      subscription = gyroscope.subscribe(({x, y, z}) => {
-        setCurrentValues({x, y, z});
+      gyroSubscription = gyroscope.subscribe(({x, y, z}) => {
+        setCurrentGyroValues({x, y, z});
         setGyroData(prevData => [
           ...prevData,
           {
@@ -27,17 +42,34 @@ const App = () => {
           },
         ]);
       });
+
+      accelSubscription = accelerometer.subscribe(({x, y, z}) => {
+        setCurrentAccelValues({ax: x, ay: y, az: z});
+        setAccelData(prevData => [
+          ...prevData,
+          {
+            ax: x,
+            ay: y,
+            az: z,
+            timestamp: Date.now(),
+            stair: isStair,
+          },
+        ]);
+      });
     }
 
     return () => {
-      if (subscription) {
-        subscription.unsubscribe();
+      if (gyroSubscription) {
+        gyroSubscription.unsubscribe();
+      }
+      if (accelSubscription) {
+        accelSubscription.unsubscribe();
       }
     };
   }, [isRecording, isStair]);
 
   useEffect(() => {
-    let timer: NodeJS.Timeout;
+    let timer: NodeJS.Timeout | null = null;
 
     if (isRecording) {
       timer = setInterval(() => {
@@ -68,12 +100,18 @@ const App = () => {
   const startRecording = () => {
     setIsRecording(true);
     setGyroData([]); // 초기화
+    setAccelData([]); // 초기화
   };
 
   const stopRecording = async () => {
     setIsRecording(false);
-    const path = `${RNFS.DownloadDirectoryPath}/gyroData.json`;
-    await RNFS.writeFile(path, JSON.stringify(gyroData), 'utf8');
+    const path = `${RNFS.DownloadDirectoryPath}/sensorData_${Date.now()}.json`;
+    // const path = `${RNFS.DocumentDirectoryPath}/sensorData_${Date.now()}.json`;
+    const combinedData = gyroData.map((gyro, index) => ({
+      ...gyro,
+      ...accelData[index], // 가속도 데이터를 합칩니다
+    }));
+    await RNFS.writeFile(path, JSON.stringify(combinedData), 'utf8');
     console.log(`파일이 저장되었습니다: ${path}`);
   };
 
@@ -92,8 +130,14 @@ const App = () => {
             경과 시간: {formatTime(elapsedTime)}
           </Text>
           <Text style={styles.currentValuesText}>
-            현재 값 - X: {currentValues.x.toFixed(2)}, Y:{' '}
-            {currentValues.y.toFixed(2)}, Z: {currentValues.z.toFixed(2)}
+            현재 자이로 값 - X: {currentGyroValues.x.toFixed(2)}, Y:{' '}
+            {currentGyroValues.y.toFixed(2)}, Z:{' '}
+            {currentGyroValues.z.toFixed(2)}
+          </Text>
+          <Text style={styles.currentValuesText}>
+            현재 가속도 값 - AX: {currentAccelValues.ax.toFixed(2)}, AY:{' '}
+            {currentAccelValues.ay.toFixed(2)}, AZ:{' '}
+            {currentAccelValues.az.toFixed(2)}
           </Text>
           <View style={styles.buttonContainer}>
             <TouchableOpacity
@@ -129,15 +173,15 @@ const styles = StyleSheet.create({
     marginVertical: 20,
   },
   button: {
-    height: 60, // 버튼 높이 설정
-    justifyContent: 'center', // 수직 중앙 정렬
-    alignItems: 'center', // 수평 중앙 정렬
-    backgroundColor: '#007BFF', // 배경 색상
-    borderRadius: 5, // 모서리 둥글기
+    height: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#007BFF',
+    borderRadius: 5,
   },
   buttonText: {
-    fontSize: 24, // 글씨 크기 설정
-    color: 'white', // 글씨 색상
+    fontSize: 24,
+    color: 'white',
   },
   stairText: {
     marginVertical: 10,
